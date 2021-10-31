@@ -1,10 +1,11 @@
+/* 
+ 	* Demux.h - Header for handling the CD4052BM multiplexer
+	* Created by Imre Korf, 31 Oktober 2021
+	* Released into the public domain
+*/
+
 #pragma once
 #include "pins.h"
-
-// due to error in pcb design only 2 of these can be used.
-#define RF_NCS
-//#define MPU_NCS
-#define LCD_NCS
 
 typedef unsigned char byte;
 

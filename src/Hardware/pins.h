@@ -1,3 +1,9 @@
+/* 
+ 	* pins.h - Header containing all pin definitions of the PCB
+	* Created by Imre Korf, 31 Oktober 2021
+	* Released into the public domain
+*/
+
 #pragma once
 #include <Arduino.h>
 
@@ -11,8 +17,8 @@
 //---------------------------//
 
 #define SCK  13
-#define SDO  12
-#define SDI  11
+#define MISO 12	// SDO
+#define MOSI 11	// SDI
 
 // switches
 //* 10TC605
