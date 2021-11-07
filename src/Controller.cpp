@@ -8,19 +8,18 @@
 #include "Controller.h"
 #include <Arduino.h>
 
-RF_PACKAGE CTRL::GetStruct(){
-	RF_PACKAGE CV;
-	CV.Pot[Left]  			= getPot(Left);
-	CV.Pot[Right] 			= getPot(Right);
-	CV.Joystick[Left][Hor]  = getJoystick(Left,  Hor);
-	CV.Joystick[Left][Ver]  = getJoystick(Left,  Ver);
-	CV.Joystick[Right][Hor] = getJoystick(Right, Hor);
-	CV.Joystick[Right][Ver] = getJoystick(Right, Ver);
-	CV.switch_L 			= getSwitch(Left);
-	CV.switch_R 			= getSwitch(Right);
-	CV.bumper_L 			= getBumper(Left);
-	CV.bumper_R 			= getBumper(Right);
-	return CV;
+void CTRL::GetStruct(RF_PACKAGE* buff){
+	buff->Package_Header		= 0x0000001D;
+	buff->Pot[Left]  			= (uint16_t)getPot(Left);
+	buff->Pot[Right] 			= (uint16_t)getPot(Right);
+	buff->Joystick[Left][Hor]   = (uint16_t)getJoystick(Left,  Hor);
+	buff->Joystick[Left][Ver]   = (uint16_t)getJoystick(Left,  Ver);
+	buff->Joystick[Right][Hor]  = (uint16_t)getJoystick(Right, Hor);
+	buff->Joystick[Right][Ver]  = (uint16_t)getJoystick(Right, Ver);
+	buff->switch_L 				= (bool)getSwitch(Left);
+	buff->switch_R 				= (bool)getSwitch(Right);
+	buff->bumper_L 				= (bool)getBumper(Left);
+	buff->bumper_R 				= (bool)getBumper(Right);
 }
 
 CTRL::CTRL(const char RF24_trans_Addr[32]) 
@@ -57,7 +56,8 @@ bool CTRL::begin(const char RF24_recv_addr[32], bool Receiver){
 }
 
 bool CTRL::TransmitCtrlData(){
-	RF_PACKAGE payload = GetStruct(); //getPot(Side::Left);
+	RF_PACKAGE payload;
+	GetStruct(&payload);
 	return TransmitRF_Package(&payload);
 }
 
@@ -66,7 +66,7 @@ bool CTRL::TransmitRF_Package(RF_PACKAGE* payload){
 	#ifdef SERIAL_DEBUG
     unsigned long start_timer = micros();                    // start the timer
 	#endif
-    bool report = radio.write(&payload, sizeof(RF_PACKAGE));  // transmit & save the report
+    bool report = radio.write(payload, sizeof(RF_PACKAGE));  // transmit & save the report
 	#ifdef SERIAL_DEBUG
     unsigned long end_timer = micros();                      // end the timer
 	#endif
@@ -76,7 +76,7 @@ bool CTRL::TransmitRF_Package(RF_PACKAGE* payload){
       Serial.print("Transmission successful! ");             // payload was delivered
       Serial.print("Time to transmit = ");
       Serial.print(end_timer - start_timer);                 // print the timer result
-	  Serial.print(" send " + String(sizeof(RF_PACKAGE) + " bytes."));
+	  Serial.println(" send " + String((uint32_t)sizeof(RF_PACKAGE)) + " bytes.");
       
     } else {
       Serial.println("Transmission failed or timed out"); // payload was not delivered
