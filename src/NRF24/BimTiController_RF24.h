@@ -15,7 +15,7 @@
 #ifndef __RF24_H__
 #define __RF24_H__
 
-#include "RF24_config.h"
+#include "BimTiController_RF24_config.h"
 
 #if defined (RF24_LINUX) || defined (LITTLEWIRE)
     #include "utility/includes.h"
@@ -110,6 +110,12 @@ typedef enum {
 
 class RF24 {
 private:
+    #ifdef SOFTSPI
+    SoftSPI<SOFT_SPI_MISO_PIN, SOFT_SPI_MOSI_PIN, SOFT_SPI_SCK_PIN, SPI_MODE> spi;
+    #elif defined (SPI_UART)
+    SPIUARTClass uspi;
+    #endif
+
     #if defined (RF24_LINUX) || defined (XMEGA_D3) /* XMEGA can use SPI class */
     SPI spi;
     #endif // defined (RF24_LINUX) || defined (XMEGA_D3)
@@ -121,7 +127,7 @@ private:
     #endif
 
     uint16_t ce_pin; /**< "Chip Enable" pin, activates the RX or TX role */
-
+    uint16_t csn_pin; /**< SPI Chip select */
     uint32_t spi_speed; /**< SPI Bus Speed */
     #if defined (RF24_LINUX) || defined (XMEGA_D3)
     uint8_t spi_rxbuff[32+1] ; //SPI receive buffer (payload max 32 bytes)
@@ -156,6 +162,26 @@ public:
      *  These are the main methods you need to operate the chip
      */
     /**@{*/
+
+    /**
+     * RF24 Constructor
+     *
+     * Creates a new instance of this driver.  Before using, you create an instance
+     * and send in the unique pins that this chip is connected to.
+     *
+     * See [Related Pages](pages.html) for device specific information <br>
+     *
+     * @param _cepin The pin attached to Chip Enable on the RF module
+     * @param _cspin The pin attached to Chip Select (often labeled CSN) on the radio module.
+     * <br><br>For the Arduino Due board, the [Arduino Due extended SPI feature](https://www.arduino.cc/en/Reference/DueExtendedSPI)
+     * is not supported. This means that the Due's pins 4, 10, or 52 are not mandated options (can use any digital output pin) for the radio's CSN pin.
+     * @param _spi_speed The SPI speed in Hz ie: 1000000 == 1Mhz <br><br>Users can specify default SPI speed by modifying
+     * `#define RF24_SPI_SPEED` in RF24_config.h
+     * - For Arduino, the default SPI speed will only be properly configured this way on devices supporting SPI TRANSACTIONS
+     * - Older/Unsupported Arduino devices will use a default clock divider & settings configuration
+     * - For Linux: The old way of setting SPI speeds using BCM2835 driver enums has been removed as of v1.3.7
+     */
+    RF24(uint16_t _cepin, uint16_t _cspin, uint32_t _spi_speed = RF24_SPI_SPEED);
 
     /**
      * A constructor for initializing the radio's hardware dynamically
@@ -207,6 +233,27 @@ public:
      */
     bool begin(_SPI* spiBus);
 
+    /**
+     * Same as begin(), but allows dynamically specifying a SPI bus, CE pin,
+     * and CSN pin to use.
+     * @note This function assumes the `SPI::begin()` method was called before to
+     * calling this function.
+     *
+     * @warning This function is for the Arduino platform only
+     *
+     * @param spiBus A pointer or reference to an instantiated SPI bus object.
+     * @param _cepin The pin attached to Chip Enable on the RF module
+     * @param _cspin The pin attached to Chip Select (often labeled CSN) on the radio module.
+     * <br><br>For the Arduino Due board, the [Arduino Due extended SPI feature](https://www.arduino.cc/en/Reference/DueExtendedSPI)
+     * is not supported. This means that the Due's pins 4, 10, or 52 are not mandated options (can use any digital output pin) for the radio's CSN pin.
+     *
+     * @note The _SPI datatype is a "wrapped" definition that will represent
+     * various SPI implementations based on the specified platform (or SoftSPI).
+     * @see Review the [Arduino support page](md_docs_arduino.html).
+     *
+     * @return same result as begin()
+     */
+    bool begin(_SPI* spiBus, uint16_t _cepin, uint16_t _cspin);
     #endif // defined (RF24_SPI_PTR) || defined (DOXYGEN_FORCED)
 
     /**
@@ -218,7 +265,7 @@ public:
      * is not supported. This means that the Due's pins 4, 10, or 52 are not mandated options (can use any digital output pin) for the radio's CSN pin.
      * @return same result as begin()
      */
-    bool begin(uint16_t _cepin);
+    bool begin(uint16_t _cepin, uint16_t _cspin);
 
     /**
      * Checks if the chip is connected to the SPI bus

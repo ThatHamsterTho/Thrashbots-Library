@@ -1,8 +1,8 @@
 #define FAILURE_HANDLING
 #define SERIAL_DEBUG
 
-#include "src/Controller.h"
-#include "src/NHDLCD/NHDLCD.h"
+#include "src/BimTiController.h"
+#include "src/NHDLCD/BimTi_NHDLCD.h"
 
 
 //#define RECEIVER
@@ -10,7 +10,7 @@
 
 // RF24 Transmitter Code
 #ifdef TRANSMITTER
-  CTRL Controller("TransmitterName");
+  CTRL Controller("TransmitterName", true);
 #else
   CTRL Controller("ReceiverName");
 #endif
@@ -31,8 +31,10 @@ void setup() {
 
   glcd.begin(); 
 
+  radio = Controller.getRadio();
+
   #ifdef TRANSMITTER
-    bool exitcode = Controller.begin("ReceiverName");
+    bool exitcode = Controller.begin("ReceiverName", true);
   #elif defined(RECEIVER)
     bool exitcode = Controller.begin("TransmitterName", true);
   #endif
@@ -41,7 +43,7 @@ void setup() {
   if(!exitcode){
     while(1);
   }
-  radio = Controller.getRadio();
+  
   #endif
 }
 
@@ -86,7 +88,7 @@ void loop() {
     
   #elif (defined (TRANSMITTER))
   
-  /*
+  
   payload.Package_Header = 0xA1A1A1A1;
   for(int i = 0; i < RF_DATA_BYTE_SIZE; i++){
     payload.RF_DATA[i] = i;
@@ -110,9 +112,9 @@ void loop() {
   } else {
     Serial.println("Transmission failed or timed out"); // payload was not delivered
   }
-  */
+
   
-    if(Controller.TransmitCtrlData()){}
+  //  if(Controller.transmitCtrlData()){}
     delay(500);
     /*
     glcd.home();

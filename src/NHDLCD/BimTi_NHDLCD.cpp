@@ -6,10 +6,10 @@
 
 #include <Arduino.h>
 #include <SPI.h>
-#include "NHDLCD.h"
+#include "BimTi_NHDLCD.h"
 #include "characterset.h"
-#include "../Hardware/pins.h"
-#include "../Hardware/Demux.h"
+#include "../Hardware/BimTipins.h"
+#include "../Hardware/BimTiDemux.h"
 
 #define GLCD_DISPLAY_ON		0xAF
 #define GLCD_DISPLAY_OFF	0xAE
@@ -55,12 +55,17 @@ void GLCD::clear() {
 }
 
 void GLCD::clearLine(uint8_t line){
-	line &= 0x03; // make sure that y is between 0 and 3
-	setCursor(0,line);
-	for(unsigned int j = 0 ; j < GLCD_COLS; j++){ 	// 128 columns wide
-      write(0x00);                     				// send picture data
-    }
-	setCursor(0, line);
+	if(line == 0xFF){
+		clearLine(C_POS[YP]);
+	}
+	else{
+		setCursor(0, line);
+		Serial.println();
+		for(unsigned int j = 0 ; j < GLCD_COLS; j++){ 	// 128 columns wide
+		write(0x00);                     				// send picture data
+		}
+		setCursor(0, line);
+	}
 }
 
 void GLCD::home() {
@@ -70,13 +75,13 @@ void GLCD::home() {
 void GLCD::setCursor(uint8_t col, uint8_t row, bool pixcol){
 	col &= 0x7F; // make sure that x is between 0 and 127
 	row &= 0x03; // make sure that y is between 0 and 3
-	C_POS[C_POS_X] = col * (7*pixcol);
-	C_POS[C_POS_Y] = row;
+	C_POS[XP] = col * (pixcol ? 7 : 1);
+	C_POS[YP] = row;
 	unsigned char page = PAGE_STRT_ADDR;
 	command(DISP_STRT_ADDR);                 			 		// Display start address + 0x40
 	command(page+C_POS[1]);
-	command(CLMN_ADDR_UPPR + (C_POS[C_POS_X] & 0xF0 >> 4));           // column address upper 4 bits 0x10 + upper_x_offset
-	command(CLMN_ADDR_LWR  + (C_POS[C_POS_X] & 0x0F     ));           // column address lower 4 bits 0x00 + lower_x_offset
+	command(CLMN_ADDR_UPPR + (C_POS[XP] & 0xF0 >> 4));           // column address upper 4 bits 0x10 + upper_x_offset
+	command(CLMN_ADDR_LWR  + (C_POS[XP] & 0x0F     ));           // column address lower 4 bits 0x00 + lower_x_offset
 	
 }
 
@@ -98,7 +103,7 @@ int GLCD::print(String S){
 
 void GLCD::writeChar(char c){
 	if(c < 32){
-		HandleSpecialChar(c);
+		handleSpecialChar(c);
 	}
   	c -= 32;
 	write(0x00);
@@ -120,14 +125,14 @@ void GLCD::writeCustomChar(uint8_t c[GLCD_SYMBOL_WIDTH]){
    		write((unsigned char)c[i]);
  	}
   	write(0x00);
-	C_POS[C_POS_X] += 7;
+	C_POS[XP] += 7;
 }
 
 void GLCD::writeCustomBlock(uint8_t symbol[7]){
 	for(int i = 0; i < 7; i++){
    		write((unsigned char)symbol[i]);
  	}
-	C_POS[C_POS_X] += 7;
+	C_POS[XP] += 7;
 }
 
 /*********** mid level commands, for sending data/cmds */
@@ -140,19 +145,13 @@ void GLCD::write(uint8_t value) {
 	this->send(value, HIGH);
 }
 
-void GLCD::getCursorPos(uint8_t* C_X, uint8_t* C_Y, bool pixcol){
-	if(pixcol){
-		*C_X = C_POS[C_POS_X] / 7;
-		*C_Y = C_POS[C_POS_Y];
-	}
-	else{
-		*C_X = C_POS[C_POS_X];
-		*C_Y = C_POS[C_POS_Y];
-	}
+void GLCD::getCursor(uint8_t& C_X, uint8_t& C_Y, bool pixcol){
+	C_X = C_POS[XP] / pixcol ? 7 : 1;
+	C_Y = C_POS[YP];
 }
 
 
-void GLCD::HandleSpecialChar(char c) {
+void GLCD::handleSpecialChar(char c) {
 	switch (c)
 	{
 	case 0:	 // NUL ( Null )
@@ -178,24 +177,35 @@ void GLCD::HandleSpecialChar(char c) {
 		break;
 	case 7:  // BEL ( Bell )
 		/* code */
+		digitalWrite(BUZZ, HIGH);
+		delay(5);
+		digitalWrite(BUZZ, LOW);
 		break;
 	case 8:  // BS  ( Backspace )
 		/* code */
+		setCursor(C_POS[XP]-1, C_POS[YP]);
+		writeChar(' ');
+		setCursor(C_POS[XP]-1, C_POS[YP]);
 		break;
 	case 9:  // HT  ( Horizontal Tab )
 		/* code */
+		print("  ");
 		break;
 	case 10: // LF  ( Line Feed )
 		/* code */
+		setCursor(0, C_POS[YP]+1);
 		break;
 	case 11: // VT  ( Vertical Tab )
 		/* code */
+		setCursor(C_POS[XP], C_POS[YP]+1);
 		break;
 	case 12: // FF  ( Form Feed )
+		setCursor(0, C_POS[YP]+2);
 		/* code */
 		break;
 	case 13: // CR  ( Carriage Return ) 
 		/* code */
+		setCursor(0, C_POS[YP]+1);
 		break;
 	case 14: // SO  ( Shift Out )  
 		/* code */

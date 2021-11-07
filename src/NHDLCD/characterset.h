@@ -6,11 +6,17 @@
 
 #pragma once
 
-// each character gets a blank column left and right of it.
-// so technically every symbol is 7x7
-#define GLCD_SYMBOL_WIDTH  5
-#define GLCD_SYMBOL_HEIGHT 7
+/**
+ * Width of the LCD symbols 
+ * each character gets a blank column left and right of it.
+ * so technically every symbol is 7x7
+ */
+#define GLCD_SYMBOL_WIDTH  5	
+#define GLCD_SYMBOL_HEIGHT 7	/* << Height of the LCD symbols */
 
+/**
+ * 2D matrix containing the definition for all the LCD symbols
+ */
 const char CharacterSet[96][GLCD_SYMBOL_WIDTH] PROGMEM = {
 	{0x00, 0x00, 0x00, 0x00, 0x00}, // Space
 	{0x00, 0x00, 0x4F, 0x00, 0x00}, // !

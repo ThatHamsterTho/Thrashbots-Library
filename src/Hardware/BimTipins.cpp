@@ -4,16 +4,16 @@
 	* Released into the public domain
 */
 
-#include "pins.h"
+#include "BimTipins.h"
 #include <Arduino.h>
 
 void InitControllerPins(){
     noInterrupts();
-    pinMode(IRQ_RF, INPUT);
+    pinMode(IRQ_RF,  INPUT);
     pinMode(IRQ_MPU, INPUT);
   
-    pinMode(SCK, OUTPUT);
-    pinMode(MISO, OUTPUT);
+    pinMode(SCK,  OUTPUT);
+    pinMode(MISO, INPUT);
     pinMode(MOSI, OUTPUT);
   
     // Inputs

@@ -6,17 +6,34 @@
  version 2 as published by the Free Software Foundation.
  */
 
-#include "nRF24L01.h"
-#include "RF24_config.h"
-#include "RF24.h"
+#include "BimTiController_nRF24L01.h"
+#include "BimTiController_RF24_config.h"
+#include "BimTiController_RF24.h"
 
-#include "../Hardware/Demux.h"
+#include "../Hardware/BimTiDemux.h"
 
 /****************************************************************************/
 
 void RF24::csn(bool mode)
 {
-    #if defined(ARDUINO) && !defined(RF24_SPI_TRANSACTIONS)
+    #if defined(RF24_TINY)
+    if (ce_pin != csn_pin) {
+        digitalWrite(csn_pin, mode);
+    }
+    else {
+        if (mode == HIGH) {
+            PORTB |= (1<<PINB2);  	                       // SCK->CSN HIGH
+            delayMicroseconds(RF24_CSN_SETTLE_HIGH_DELAY); // allow csn to settle.
+        }
+        else {
+            PORTB &= ~(1<<PINB2);	                      // SCK->CSN LOW
+            delayMicroseconds(RF24_CSN_SETTLE_LOW_DELAY); // allow csn to settle
+        }
+    }
+    // Return, CSN toggle complete
+    return;
+
+    #elif defined(ARDUINO) && !defined(RF24_SPI_TRANSACTIONS)
     // Minimum ideal SPI bus speed is 2x data rate
     // If we assume 2Mbs data rate and 16Mhz clock, a
     // divider of 4 is the minimum we want.
@@ -69,24 +86,45 @@ void RF24::csn(bool mode)
                 #endif // F_CPU to SPI_CLOCK_DIV translation
             #endif // !defined(RF24_SPI_PTR)
         #endif // !defined(SOFTSPI)
-    #endif
 
-    Demux::Set(mode ? CSN::NONE : CSN::RF);
-    delayMicroseconds(csDelay);
+    #elif defined (RF24_RPi)
+    if(!mode)
+        _SPI.chipSelect(csn_pin);
+    #endif // defined(RF24_RPi)
+	
+	if(!csn_pin){
+		Demux::Set(mode ? CSN::NONE : CSN::RF);
+    	delayMicroseconds(csDelay);
+    }
+    else{
+		#if !defined(RF24_LINUX)
+		digitalWrite(csn_pin, mode);
+		delayMicroseconds(csDelay);
+		#endif // !defined(RF24_LINUX)
+    }
 }
 
 /****************************************************************************/
 
 void RF24::ce(bool level)
 {
-    digitalWrite(ce_pin, level);
+    //Allow for 3-pin use on ATTiny
+    if (ce_pin != csn_pin) {
+        digitalWrite(ce_pin, level);
+    }
 }
 
 /****************************************************************************/
 
 inline void RF24::beginTransaction()
 {
+    #if defined (RF24_SPI_TRANSACTIONS)
+        #if defined (RF24_SPI_PTR)
     _spi->beginTransaction(SPISettings(spi_speed, MSBFIRST, SPI_MODE0));
+        #else // !defined(RF24_SPI_PTR)
+    _SPI.beginTransaction(SPISettings(spi_speed, MSBFIRST, SPI_MODE0));
+        #endif // !defined(RF24_SPI_PTR)
+    #endif // defined (RF24_SPI_TRANSACTIONS)
     csn(LOW);
 }
 
@@ -95,17 +133,50 @@ inline void RF24::beginTransaction()
 inline void RF24::endTransaction()
 {
     csn(HIGH);
+    #if defined (RF24_SPI_TRANSACTIONS)
+        #if defined (RF24_SPI_PTR)
     _spi->endTransaction();
+        #else // !defined(RF24_SPI_PTR)
+    _SPI.endTransaction();
+        #endif // !defined(RF24_SPI_PTR)
+    #endif // defined (RF24_SPI_TRANSACTIONS)
 }
 
 /****************************************************************************/
 
 void RF24::read_register(uint8_t reg, uint8_t* buf, uint8_t len)
 {
+    #if defined(RF24_LINUX)
+    beginTransaction(); //configures the spi settings for RPi, locks mutex and setting csn low
+    uint8_t * prx = spi_rxbuff;
+    uint8_t * ptx = spi_txbuff;
+    uint8_t size = len + 1; // Add register value to transmit buffer
+
+    *ptx++ = (R_REGISTER | reg);
+
+    while (len--){ *ptx++ = RF24_NOP; } // Dummy operation, just for reading
+
+    _SPI.transfernb((char *)spi_txbuff, (char *)spi_rxbuff, size);
+
+    status = *prx++; // status is 1st byte of receive buffer
+
+    // decrement before to skip status byte
+    while (--size) { *buf++ = *prx++; }
+    endTransaction(); // unlocks mutex and setting csn high
+    #else // !defined(RF24_LINUX)
+
     beginTransaction();
+        #if defined (RF24_SPI_PTR)
     status = _spi->transfer(R_REGISTER | reg);
     while (len--) { *buf++ = _spi->transfer(0xFF); }
+
+        #else // !defined(RF24_SPI_PTR)
+    status = _SPI.transfer(R_REGISTER | reg);
+    while (len--) { *buf++ = _SPI.transfer(0xFF); }
+
+        #endif // !defined(RF24_SPI_PTR)
     endTransaction();
+    #endif // !defined(RF24_LINUX)
 }
 
 /****************************************************************************/
@@ -114,10 +185,33 @@ uint8_t RF24::read_register(uint8_t reg)
 {
     uint8_t result;
 
+    #if defined(RF24_LINUX)
     beginTransaction();
+
+    uint8_t * prx = spi_rxbuff;
+    uint8_t * ptx = spi_txbuff;
+    *ptx++ = (R_REGISTER | reg);
+    *ptx++ = RF24_NOP ; // Dummy operation, just for reading
+
+    _SPI.transfernb((char *)spi_txbuff, (char *)spi_rxbuff, 2);
+    status = *prx;     // status is 1st byte of receive buffer
+    result = *++prx;   // result is 2nd byte of receive buffer
+
+    endTransaction();
+    #else // !defined(RF24_LINUX)
+
+    beginTransaction();
+        #if defined (RF24_SPI_PTR)
     status = _spi->transfer(R_REGISTER | reg);
     result = _spi->transfer(0xff);
+
+        #else // !defined(RF24_SPI_PTR)
+    status = _SPI.transfer(R_REGISTER | reg);
+    result = _SPI.transfer(0xff);
+
+        #endif // !defined(RF24_SPI_PTR)
     endTransaction();
+    #endif // !defined(RF24_LINUX)
 
     return result;
 }
@@ -126,10 +220,33 @@ uint8_t RF24::read_register(uint8_t reg)
 
 void RF24::write_register(uint8_t reg, const uint8_t* buf, uint8_t len)
 {
+    #if defined(RF24_LINUX)
     beginTransaction();
+    uint8_t * prx = spi_rxbuff;
+    uint8_t * ptx = spi_txbuff;
+    uint8_t size = len + 1; // Add register value to transmit buffer
+
+    *ptx++ = (W_REGISTER | (REGISTER_MASK & reg));
+    while (len--)
+      *ptx++ = *buf++;
+
+    _SPI.transfernb((char *)spi_txbuff, (char *)spi_rxbuff, size);
+    status = *prx; // status is 1st byte of receive buffer
+    endTransaction();
+    #else // !defined(RF24_LINUX)
+
+    beginTransaction();
+        #if defined (RF24_SPI_PTR)
     status = _spi->transfer(W_REGISTER | reg);
     while (len--) { _spi->transfer(*buf++); }
+
+        #else // !defined(RF24_SPI_PTR)
+    status = _SPI.transfer(W_REGISTER | reg);
+    while (len--) { _SPI.transfer(*buf++); }
+
+        #endif // !defined(RF24_SPI_PTR)
     endTransaction();
+    #endif // !defined(RF24_LINUX)
 }
 
 /****************************************************************************/
@@ -141,16 +258,41 @@ void RF24::write_register(uint8_t reg, uint8_t value, bool is_cmd_only)
             IF_SERIAL_DEBUG(printf_P(PSTR("write_register(%02x)\r\n"), reg));
         }
         beginTransaction();
+        #if defined (RF24_LINUX)
+        status = _SPI.transfer(W_REGISTER | reg);
+        #else
+            #if defined (RF24_SPI_PTR)
         status = _spi->transfer(W_REGISTER | reg);
+            #else // !defined (RF24_SPI_PTR)
+        status = _SPI.transfer(W_REGISTER | reg);
+            #endif // !defined (RF24_SPI_PTR)
+        #endif // !defined(RF24_LINUX)
         endTransaction();
     }
     else {
         IF_SERIAL_DEBUG(printf_P(PSTR("write_register(%02x,%02x)\r\n"), reg, value));
+        #if defined(RF24_LINUX)
+        beginTransaction();
+        uint8_t * prx = spi_rxbuff;
+        uint8_t * ptx = spi_txbuff;
+        *ptx++ = (W_REGISTER | reg);
+        *ptx = value;
+
+        _SPI.transfernb((char *)spi_txbuff, (char *)spi_rxbuff, 2);
+        status = *prx++; // status is 1st byte of receive buffer
+        endTransaction();
+        #else // !defined(RF24_LINUX)
 
         beginTransaction();
+            #if defined (RF24_SPI_PTR)
         status = _spi->transfer(W_REGISTER | reg);
         _spi->transfer(value);
+            #else // !defined(RF24_SPI_PTR)
+        status = _SPI.transfer(W_REGISTER | reg);
+        _SPI.transfer(value);
+            #endif // !defined(RF24_SPI_PTR)
         endTransaction();
+        #endif // !defined(RF24_LINUX)
     }
 }
 
@@ -170,13 +312,39 @@ void RF24::write_payload(const void* buf, uint8_t data_len, const uint8_t writeT
     }
 
     //printf("[Writing %u bytes %u blanks]",data_len,blank_len);
-    IF_SERIAL_DEBUG(Serial.println((String)("[Writing ") + String(data_len) + " bytes " + String(blank_len) + " blanks]"); );
+    IF_SERIAL_DEBUG(printf("[Writing %u bytes %u blanks]\n", data_len, blank_len); );
+
+    #if defined(RF24_LINUX)
+    beginTransaction();
+    uint8_t * prx = spi_rxbuff;
+    uint8_t * ptx = spi_txbuff;
+    uint8_t size;
+    size = data_len + blank_len + 1 ; // Add register value to transmit buffer
+
+    *ptx++ =  writeType;
+    while (data_len--) { *ptx++ =  *current++; }
+    while (blank_len--) { *ptx++ =  0; }
+
+    _SPI.transfernb((char *)spi_txbuff, (char *)spi_rxbuff, size);
+    status = *prx; // status is 1st byte of receive buffer
+    endTransaction();
+
+    #else // !defined(RF24_LINUX)
 
     beginTransaction();
+        #if defined (RF24_SPI_PTR)
     status = _spi->transfer(writeType);
     while (data_len--) { _spi->transfer(*current++); }
     while (blank_len--) { _spi->transfer(0); }
+
+        #else // !defined(RF24_SPI_PTR)
+    status = _SPI.transfer(writeType);
+    while (data_len--) { _SPI.transfer(*current++); }
+    while (blank_len--) { _SPI.transfer(0); }
+
+        #endif // !defined(RF24_SPI_PTR)
     endTransaction();
+    #endif // !defined(RF24_LINUX)
 }
 
 /****************************************************************************/
@@ -198,12 +366,46 @@ void RF24::read_payload(void* buf, uint8_t data_len)
 
     IF_SERIAL_DEBUG(printf("[Reading %u bytes %u blanks]\n", data_len, blank_len); );
 
+    #if defined(RF24_LINUX)
     beginTransaction();
+    uint8_t * prx = spi_rxbuff;
+    uint8_t * ptx = spi_txbuff;
+    uint8_t size;
+    size = data_len + blank_len + 1; // Add register value to transmit buffer
+
+    *ptx++ =  R_RX_PAYLOAD;
+    while(--size) { *ptx++ = RF24_NOP; }
+
+    size = data_len + blank_len + 1; // Size has been lost during while, re affect
+
+    _SPI.transfernb((char *)spi_txbuff, (char *)spi_rxbuff, size);
+
+    status = *prx++; // 1st byte is status
+
+    if (data_len > 0) {
+      while (--data_len) // Decrement before to skip 1st status byte
+          *current++ = *prx++;
+
+      *current = *prx;
+    }
+    endTransaction();
+    #else // !defined(RF24_LINUX)
+
+    beginTransaction();
+        #if defined (RF24_SPI_PTR)
     status = _spi->transfer(R_RX_PAYLOAD);
     while (data_len--) { *current++ = _spi->transfer(0xFF); }
     while (blank_len--) { _spi->transfer(0xff); }
+
+        #else // !defined(RF24_SPI_PTR)
+    status = _SPI.transfer(R_RX_PAYLOAD);
+    while (data_len--) { *current++ = _SPI.transfer(0xFF); }
+    while (blank_len--) { _SPI.transfer(0xff); }
+
+        #endif // !defined(RF24_SPI_PTR)
     endTransaction();
 
+    #endif // !defined(RF24_LINUX)
 }
 
 /****************************************************************************/
@@ -231,6 +433,7 @@ uint8_t RF24::get_status(void)
 }
 
 /****************************************************************************/
+#if !defined(MINIMAL)
 
 void RF24::print_status(uint8_t _status)
 {
@@ -252,7 +455,11 @@ void RF24::print_byte_register(const char* name, uint8_t reg, uint8_t qty)
 {
     //char extra_tab = strlen_P(name) < 8 ? '\t' : 0;
     //printf_P(PSTR(PRIPSTR"\t%c ="),name,extra_tab);
+    #if defined(RF24_LINUX)
+    printf("%s\t=", name);
+    #else // !defined(RF24_LINUX)
     printf_P(PSTR(PRIPSTR"\t="),name);
+    #endif // !defined(RF24_LINUX)
     while (qty--) {
         printf_P(PSTR(" 0x%02x"), read_register(reg++));
     }
@@ -264,7 +471,11 @@ void RF24::print_byte_register(const char* name, uint8_t reg, uint8_t qty)
 void RF24::print_address_register(const char* name, uint8_t reg, uint8_t qty)
 {
 
+    #if defined(RF24_LINUX)
+    printf("%s\t=", name);
+    #else // !defined(RF24_LINUX)
     printf_P(PSTR(PRIPSTR"\t="), name);
+    #endif // !defined(RF24_LINUX)
     while (qty--) {
         uint8_t buffer[addr_width];
         read_register(reg++ & REGISTER_MASK, buffer, sizeof(buffer));
@@ -279,10 +490,21 @@ void RF24::print_address_register(const char* name, uint8_t reg, uint8_t qty)
     printf_P(PSTR("\r\n"));
 }
 
+#endif // !defined(MINIMAL)
+
+/****************************************************************************/
+
+RF24::RF24(uint16_t _cepin, uint16_t _cspin, uint32_t _spi_speed)
+        :ce_pin(_cepin), csn_pin(_cspin), spi_speed(_spi_speed), payload_size(32), dynamic_payloads_enabled(true), addr_width(5), _is_p_variant(false),
+         csDelay(5)
+{
+    _init_obj();
+}
+
 /****************************************************************************/
 
 RF24::RF24(uint32_t _spi_speed)
-        :ce_pin(RFCE), spi_speed(_spi_speed), payload_size(32), dynamic_payloads_enabled(true), addr_width(5), _is_p_variant(false),
+        :ce_pin(0xFFFF), csn_pin(0xFFFF), spi_speed(_spi_speed), payload_size(32), dynamic_payloads_enabled(true), addr_width(5), _is_p_variant(false),
          csDelay(5)
 {
     _init_obj();
@@ -293,7 +515,9 @@ RF24::RF24(uint32_t _spi_speed)
 void RF24::_init_obj()
 {
     // Use a pointer on the Arduino platform
+    #if defined (RF24_SPI_PTR)
     _spi = &SPI;
+    #endif // defined (RF24_SPI_PTR)
 
     pipe0_reading_address[0] = 0;
     if(spi_speed <= 35000){ //Handle old BCM2835 speed constants, default to RF24_SPI_SPEED
@@ -401,7 +625,10 @@ void RF24::printDetails(void)
 
     #if defined(RF24_LINUX)
     printf("================ SPI Configuration ================\n" );
-    printf("CE Pin\t\t= Custom GPIO%d\n", RFCE);
+    uint8_t bus_ce = csn_pin % 10;
+    uint8_t bus_numb = (csn_pin - bus_ce) / 10;
+    printf("CSN Pin\t\t= /dev/spidev%d.%d\n", bus_numb, bus_ce);
+    printf("CE Pin\t\t= Custom GPIO%d\n", ce_pin);
     #endif
     printf_P(PSTR("SPI Speedz\t= %d Mhz\n"),(uint8_t)(spi_speed/1000000)); //Print the SPI speed on non-Linux devices
     #if defined(RF24_LINUX)
@@ -441,7 +668,10 @@ void RF24::printPrettyDetails(void) {
 
     #if defined(RF24_LINUX)
     printf("================ SPI Configuration ================\n");
-    printf("CE Pin\t\t\t= Custom GPIO%d\n", RFCE);
+    uint8_t bus_ce = csn_pin % 10;
+    uint8_t bus_numb = (csn_pin - bus_ce) / 10;
+    printf("CSN Pin\t\t\t= /dev/spidev%d.%d\n", bus_numb, bus_ce);
+    printf("CE Pin\t\t\t= Custom GPIO%d\n", ce_pin);
     #endif
     printf_P(PSTR("SPI Frequency\t\t= %d Mhz\n"), (uint8_t)(spi_speed / 1000000)); //Print the SPI speed on non-Linux devices
     #if defined(RF24_LINUX)
@@ -537,17 +767,62 @@ bool RF24::begin(_SPI* spiBus)
     return false;
 }
 
+/****************************************************************************/
+
+bool RF24::begin(_SPI* spiBus, uint16_t _cepin, uint16_t _cspin)
+{
+    ce_pin = _cepin;
+    csn_pin = _cspin;
+    return begin(spiBus);
+}
+
 #endif // defined (RF24_SPI_PTR) || defined (DOXYGEN_FORCED)
 
 /****************************************************************************/
 
-bool RF24::begin(void)
-{   
-    ce_pin = RFCE;
-    _spi->begin();
-    
-    return _init_pins() && _init_radio();
+bool RF24::begin(uint16_t _cepin, uint16_t _cspin)
+{
+    ce_pin = _cepin;
+    csn_pin = _cspin;
+    return begin();
+}
 
+/****************************************************************************/
+
+bool RF24::begin(void)
+{
+
+    #if defined (RF24_LINUX)
+        #if defined (RF24_RPi)
+    switch(csn_pin) {                 // Ensure valid hardware CS pin
+        case 0: break;
+        case 1: break;
+        // Allow BCM2835 enums for RPi
+        case 8: csn_pin = 0; break;
+        case 7: csn_pin = 1; break;
+        case 18: csn_pin = 10; break; // to make it work on SPI1
+        case 17: csn_pin = 11; break;
+        case 16: csn_pin = 12; break;
+        default: csn_pin = 0; break;
+    }
+        #endif // RF24_RPi
+
+    _SPI.begin(csn_pin, spi_speed);
+
+    #elif defined (XMEGA_D3)
+    _spi->begin(csn_pin);
+
+    #else // using an Arduino platform || defined (LITTLEWIRE)
+
+        #if defined (RF24_SPI_PTR)
+    _spi->begin();
+        #else  // !defined(RF24_SPI_PTR)
+    _SPI.begin();
+        #endif // !defined(RF24_SPI_PTR)
+
+    #endif // !defined(XMEGA_D3) && !defined(RF24_LINUX)
+
+    return _init_pins() && _init_radio();
 }
 
 /****************************************************************************/
@@ -556,13 +831,47 @@ bool RF24::_init_pins()
 {
     if (!isValid()) {
         // didn't specify the CSN & CE pins to c'tor nor begin()
-        Serial.println("CE not a valid pin");
         return false;
+    }
+
+    #if defined (RF24_LINUX)
+
+        #if defined (MRAA)
+    GPIO();
+    gpio.begin(ce_pin, csn_pin);
+        #endif
+
+    pinMode(ce_pin, OUTPUT);
+    ce(LOW);
+    delay(100);
+
+    #elif defined (LITTLEWIRE)
+    pinMode(csn_pin, OUTPUT);
+    csn(HIGH);
+
+    #elif defined (XMEGA_D3)
+    if (ce_pin != csn_pin) {
+        pinMode(ce_pin, OUTPUT);
+    };
+    ce(LOW);
+    csn(HIGH);
+    delay(200);
+
+    #else // using an Arduino platform
+
+    // Initialize pins
+    if (ce_pin != csn_pin) {
+        pinMode(ce_pin, OUTPUT);
+        pinMode(csn_pin, OUTPUT);
     }
 
     ce(LOW);
     csn(HIGH);
+
+        #if defined (__ARDUINO_X86__)
     delay(100);
+        #endif
+    #endif // !defined(XMEGA_D3) && !defined(LITTLEWIRE) && !defined(RF24_LINUX)
 
     return true; // assuming pins are connected properly
 }
@@ -655,15 +964,16 @@ bool RF24::isChipConnected()
 
 bool RF24::isValid()
 {
-    return true;
+    return ce_pin != 0xFFFF && csn_pin != 0xFFFF;
 }
 
 /****************************************************************************/
 
 void RF24::startListening(void)
 {
+    #if !defined(RF24_TINY) && !defined(LITTLEWIRE)
     powerUp();
-
+    #endif
     config_reg |= _BV(PRIM_RX);
     write_register(NRF_CONFIG, config_reg);
     write_register(NRF_STATUS, _BV(RX_DR) | _BV(TX_DS) | _BV(MAX_RT));
@@ -694,7 +1004,13 @@ void RF24::stopListening(void)
     config_reg &= ~_BV(PRIM_RX);
     write_register(NRF_CONFIG, config_reg);
 
-    
+    #if defined(RF24_TINY) || defined(LITTLEWIRE)
+    // for 3 pins solution TX mode is only left with additonal powerDown/powerUp cycle
+    if (ce_pin == csn_pin) {
+      powerDown();
+      powerUp();
+    }
+    #endif
     write_register(EN_RXADDR, read_register(EN_RXADDR) | _BV(pgm_read_byte(&child_pipe_enable[0]))); // Enable RX on pipe0
 }
 
@@ -725,7 +1041,7 @@ void RF24::powerUp(void)
 }
 
 /******************************************************************/
-#if defined(FAILURE_HANDLING)
+#if defined(FAILURE_HANDLING) || defined(RF24_LINUX)
 
 void RF24::errNotify()
 {
@@ -749,16 +1065,15 @@ bool RF24::write(const void* buf, uint8_t len, const bool multicast)
     startFastWrite(buf, len, multicast);
 
     //Wait until complete or failed
-    #if defined(FAILURE_HANDLING)
+    #if defined(FAILURE_HANDLING) || defined(RF24_LINUX)
     uint32_t timer = millis();
-    #endif // defined(FAILURE_HANDLING)
+    #endif // defined(FAILURE_HANDLING) || defined(RF24_LINUX)
 
     while (!(get_status() & (_BV(TX_DS) | _BV(MAX_RT)))) {
-        #if defined(FAILURE_HANDLING)
+        #if defined(FAILURE_HANDLING) || defined(RF24_LINUX)
         if (millis() - timer > 95) {
             errNotify();
             #if defined(FAILURE_HANDLING)
-            Serial.println("Timed out!");
             return 0;
             #else
             delay(100);
@@ -804,7 +1119,7 @@ bool RF24::writeBlocking(const void* buf, uint8_t len, uint32_t timeout)
                 return 0;                                    // If this payload has exceeded the user-defined timeout, exit and return 0
             }
         }
-        #if defined(FAILURE_HANDLING)
+        #if defined(FAILURE_HANDLING) || defined(RF24_LINUX)
         if (millis() - timer > (timeout + 95)) {
             errNotify();
             #if defined(FAILURE_HANDLING)
@@ -840,7 +1155,7 @@ bool RF24::writeFast(const void* buf, uint8_t len, const bool multicast)
     //Return 0 so the user can control the retrys and set a timer or failure counter if required
     //The radio will auto-clear everything in the FIFO as long as CE remains high
 
-    #if defined(FAILURE_HANDLING)
+    #if defined(FAILURE_HANDLING) || defined(RF24_LINUX)
     uint32_t timer = millis();
     #endif
 
@@ -850,7 +1165,7 @@ bool RF24::writeFast(const void* buf, uint8_t len, const bool multicast)
             return 0;                                        //Return 0. The previous payload has not been retransmitted
             // From the user perspective, if you get a 0, just keep trying to send the same payload
         }
-        #if defined(FAILURE_HANDLING)
+        #if defined(FAILURE_HANDLING) || defined(RF24_LINUX)
         if (millis() - timer > 95) {
             errNotify();
             #if defined(FAILURE_HANDLING)
@@ -914,7 +1229,7 @@ bool RF24::rxFifoFull()
 bool RF24::txStandBy()
 {
 
-    #if defined(FAILURE_HANDLING)
+    #if defined(FAILURE_HANDLING) || defined(RF24_LINUX)
     uint32_t timeout = millis();
     #endif
     while (!(read_register(FIFO_STATUS) & _BV(TX_EMPTY))) {
@@ -924,7 +1239,7 @@ bool RF24::txStandBy()
             flush_tx();    //Non blocking, flush the data
             return 0;
         }
-        #if defined(FAILURE_HANDLING) 
+        #if defined(FAILURE_HANDLING) || defined(RF24_LINUX)
         if (millis() - timeout > 95) {
             errNotify();
             #if defined(FAILURE_HANDLING)
@@ -960,7 +1275,7 @@ bool RF24::txStandBy(uint32_t timeout, bool startTx)
                 return 0;
             }
         }
-        #if defined(FAILURE_HANDLING)
+        #if defined(FAILURE_HANDLING) || defined(RF24_LINUX)
         if (millis() - start > (timeout + 95)) {
             errNotify();
             #if defined(FAILURE_HANDLING)
@@ -1150,8 +1465,13 @@ void RF24::closeReadingPipe(uint8_t pipe)
 void RF24::toggle_features(void)
 {
     beginTransaction();
+    #if defined (RF24_SPI_PTR)
     status = _spi->transfer(ACTIVATE);
     _spi->transfer(0x73);
+    #else
+    status = _SPI.transfer(ACTIVATE);
+    _SPI.transfer(0x73);
+    #endif
     endTransaction();
 }
 

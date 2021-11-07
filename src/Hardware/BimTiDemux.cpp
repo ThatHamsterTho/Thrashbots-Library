@@ -3,7 +3,7 @@
 	* Created by Imre Korf, 31 Oktober 2021
 	* Released into the public domain
 */
-#include "Demux.h"
+#include "BimTiDemux.h"
 #include <Arduino.h>
 
 // assign memory to the SC member
