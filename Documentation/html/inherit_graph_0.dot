@@ -1,0 +1,8 @@
+digraph "Graphical Class Hierarchy"
+{
+ // LATEX_PDF_SIZE
+  edge [fontname="Helvetica",fontsize="10",labelfontname="Helvetica",labelfontsize="10"];
+  node [fontname="Helvetica",fontsize="10",shape=record];
+  rankdir="LR";
+  Node0 [label="Demux",height=0.2,width=0.4,color="black", fillcolor="white", style="filled",URL="$class_demux.html",tooltip="Demux is implemented as a static class to make sure that data. will only select other chip if none is..."];
+}

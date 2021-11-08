@@ -1,0 +1,32 @@
+#######################################
+# Syntax Coloring Map
+#######################################
+
+#######################################
+# Datatypes (KEYWORD1)
+#######################################
+
+CTRL		KEYWORD1	CTRL
+
+#######################################
+# Methods and Functions (KEYWORD2)
+#######################################
+begin				KEYWORD2
+getSwitch			KEYWORD2
+getBumper			KEYWORD2
+getPot				KEYWORD2
+getJoystick			KEYWORD2
+beep				KEYWORD2
+transmitCtrlData	KEYWORD2
+
+#######################################
+# Constants (LITERAL1)
+#######################################
+Left				LITERAL1
+Right				LITERAL1
+Hor					LITERAL1
+Ver					LITERAL1
+NONE				LITERAL1
+MPU					LITERAL1
+RF					LITERAL1
+LCD					LITERAL1
